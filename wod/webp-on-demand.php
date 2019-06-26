@@ -7,6 +7,8 @@ use \WebPExpress\ConvertHelperIndependent;
 use \WebPExpress\Sanitize;
 use \WebPExpress\SanityCheck;
 use \WebPExpress\SanityException;
+use \WebPExpress\ValidateException;
+use \WebPExpress\Validate;
 
 class WebPOnDempand
 {
@@ -44,24 +46,27 @@ class WebPOnDempand
         include_once __DIR__ . '/../lib/classes/Sanitize.php';
         include_once __DIR__ . '/../lib/classes/SanityCheck.php';
         include_once __DIR__ . '/../lib/classes/SanityException.php';
+        include_once __DIR__ . '/../lib/classes/Validate.php';
+        include_once __DIR__ . '/../lib/classes/ValidateException.php';
 
         // Check input
         // --------------
-
         try {
 
             // Check DOCUMENT_ROOT
             // ----------------------
             $checking = 'DOCUMENT_ROOT';
             $docRoot = SanityCheck::absPath($_SERVER["DOCUMENT_ROOT"]);
-
-            // Use realpath to expand symbolic links and check if it exists
-            $docRoot = realpath($docRoot);
-            if ($docRoot === false) {
-                throw new SanityException('Cannot find document root');
-            }
             $docRoot = rtrim($docRoot, '/');
             $docRoot = SanityCheck::absPathExistsAndIsDir($docRoot);
+
+            // Use realpath to expand symbolic links and check if it exists
+            $docRootSymLinksExpanded = realpath($docRoot);
+            if ($docRootSymLinksExpanded === false) {
+                throw new SanityException('Cannot find document root');
+            }
+            $docRootSymLinksExpanded = rtrim($docRootSymLinksExpanded, '/');
+            $docRootSymLinksExpanded = SanityCheck::absPathExistsAndIsDir($docRootSymLinksExpanded);
 
             // Check wp-content
             // ----------------------
@@ -121,26 +126,28 @@ class WebPOnDempand
             // Check if it is in an environment variable
             $source = self::getEnvPassedInRewriteRule('REQFN');
             if ($source !== false) {
-                $source = SanityCheck::absPathExistsAndIsFileInDocRoot($source);
-                echo $source; exit;
+                $checking = 'source (passed through env)';
+                $source = SanityCheck::absPathExistsAndIsFile($source);
             } else {
                 // Check if it is in header (but only if .htaccess was configured to send in header)
                 if (isset($wodOptions['base-htaccess-on-these-capability-tests'])) {
                     $capTests = $wodOptions['base-htaccess-on-these-capability-tests'];
                     $passThroughHeaderDefinitelyUnavailable = ($capTests['passThroughHeaderWorking'] === false);
                     $passThrougEnvVarDefinitelyAvailable =($capTests['passThroughEnvWorking'] === true);
+                    // This determines if .htaccess was configured to send in querystring
+                    $headerMagicAddedInHtaccess = ((!$passThrougEnvVarDefinitelyAvailable) && (!$passThroughHeaderDefinitelyUnavailable));
                 } else {
-                    $passThroughHeaderDefinitelyUnavailable = false;
-                    $passThrougEnvVarDefinitelyAvailable = false;
+                    $headerMagicAddedInHtaccess = true;  // pretend its true
                 }
-                if ((!$passThrougEnvVarDefinitelyAvailable) && (!$passThroughHeaderDefinitelyUnavailable)) {
-                    if (isset($_SERVER['HTTP_REQFN'])) {
-                        $source = SanityCheck::absPathExistsAndIsFileInDocRoot($_SERVER['HTTP_REQFN']);
-                    }
+
+                if ($headerMagicAddedInHtaccess && (isset($_SERVER['HTTP_REQFN']))) {
+                    $checking = 'source (passed through request header)';
+                    $source = SanityCheck::absPathExistsAndIsFile($_SERVER['HTTP_REQFN']);
                 } else {
                     // Check querystring (relative path)
                     $srcRel = '';
                     if (isset($_GET['xsource-rel'])) {
+                        $checking = 'source (passed as relative path, through querystring)';
                         $xsrcRel = SanityCheck::noControlChars($_GET['xsource-rel']);
                         $srcRel = SanityCheck::pathWithoutDirectoryTraversal(substr($xsrcRel, 1));
                         $source = SanityCheck::absPathExistsAndIsFile($docRoot . '/' . $srcRel);
@@ -151,22 +158,30 @@ class WebPOnDempand
                             (stripos($_SERVER["SERVER_SOFTWARE"], 'nginx') !== false) &&
                             (isset($_GET['source']) || isset($_GET['xsource']))
                         ) {
+                            $checking = 'source (passed as absolute path on nginx)';
                             if (isset($_GET['source'])) {
-                                $source = SanityCheck::absPathExistsAndIsFileInDocRoot($_GET['source']);
+                                $source = SanityCheck::absPathExistsAndIsFile($_GET['source']);
                             } else {
                                 $xsrc = SanityCheck::noControlChars($_GET['xsource']);
-                                $source = SanityCheck::absPathExistsAndIsFileInDocRoot(substr($xsrc, 1));
+                                $source = SanityCheck::absPathExistsAndIsFile(substr($xsrc, 1));
                             }
                         } else {
                             // Last resort is to use $_SERVER['REQUEST_URI'], well knowing that it does not give the
                             // correct result in all setups (ie "folder method 1")
+                            $checking = 'source (retrieved by the request_uri server var)';
                             $srcRel = SanityCheck::pathWithoutDirectoryTraversal(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
                             $source = SanityCheck::absPathExistsAndIsFile($docRoot . $srcRel);
                         }
                     }
                 }
             }
-            $source = SanityCheck::pathBeginsWith($source, $docRoot . '/');
+
+            // Make sure it is in doc root
+            try {
+                $source = SanityCheck::pathBeginsWith($source, $docRoot . '/');
+            } catch (SanityException $e) {
+                $source = SanityCheck::pathBeginsWith(realpath($source), $docRootSymLinksExpanded . '/');
+            }
 
             // Check destination path
             // --------------------------------------------
@@ -178,6 +193,7 @@ class WebPOnDempand
                 $webExpressContentDirAbs,
                 $docRoot . '/' . $wodOptions['paths']['uploadDirRel']
             );
+            //echo 'dest:' . $destination; exit;
             $destination = SanityCheck::absPath($destination);
             $destination = SanityCheck::pregMatch('#\.webp$#', $destination, 'Does not end with .webp');
             $destination = SanityCheck::pathBeginsWith($destination, $docRoot . '/');
@@ -196,6 +212,7 @@ class WebPOnDempand
         } else {
             $serveOptions['serve-image']['headers']['vary-accept'] = true;
         }
+//echo $source . '<br>' . $destination; exit;
 
         ConvertHelperIndependent::serveConverted(
             $source,

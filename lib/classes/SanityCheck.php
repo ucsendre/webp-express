@@ -115,26 +115,36 @@ class SanityCheck
         return $input;
     }
 
-    public static function absPathIsInDocRoot($input, $errorMsg = 'Path is outside allowed path')
-    {
-        $docRoot = self::absPath($_SERVER["DOCUMENT_ROOT"]);
-
-        // Use realpath to expand symbolic links and check if it exists
-        $docRoot = realpath($docRoot);
-        if ($docRoot === false) {
-            throw new SanityException('Cannot find document root');
-        }
-        $docRoot = rtrim($docRoot, '/');
-        $docRoot = self::absPathExists($docRoot, 'Document root does not exist!');
-        $docRoot = self::absPathExistsAndIsDir($docRoot, 'Document root is not a directory!');
-
-        self::pathBeginsWith($input, $docRoot . '/', $errorMsg);
-        return $input;
-    }
-
     public static function absPath($input)
     {
         return self::path($input);
+    }
+
+    public static function absPathIsInDocRoot($input, $errorMsg = 'Path is outside document root')
+    {
+        $docRoot = self::absPath($_SERVER["DOCUMENT_ROOT"]);
+        $docRoot = rtrim($docRoot, '/');
+        $docRoot = self::absPathExistsAndIsDir($docRoot);
+
+        // Use realpath to expand symbolic links and check if it exists
+        $docRootSymLinksExpanded = realpath($docRoot);
+        if ($docRootSymLinksExpanded === false) {
+            throw new SanityException('Cannot find document root');
+        }
+        $docRootSymLinksExpanded = rtrim($docRootSymLinksExpanded, '/');
+        $docRootSymLinksExpanded = self::absPathExists($docRootSymLinksExpanded, 'Document root does not exist!');
+        $docRootSymLinksExpanded = self::absPathExistsAndIsDir($docRootSymLinksExpanded, 'Document root is not a directory!');
+
+        try {
+            // try without symlinks expanded
+            self::pathBeginsWith($input, $docRoot . '/', $errorMsg);
+        } catch (SanityException $e) {
+
+            // if that fails, check with symlinks expanded
+            self::pathBeginsWith(realpath($input), $docRootSymLinksExpanded . '/', $errorMsg);
+        }
+
+        return $input;
     }
 
     public static function absPathExists($input, $errorMsg = 'Path does not exist')

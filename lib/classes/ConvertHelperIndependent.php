@@ -71,25 +71,34 @@ class ConvertHelperIndependent
         try {
             // Check source
             // --------------
-            $source = SanityCheck::absPathExistsAndIsFileInDocRoot($source);
+            // TODO: make this check work with symlinks
+            //$source = SanityCheck::absPathExistsAndIsFileInDocRoot($source);
 
             // Calculate destination and check that the result is sane
             // -------------------------------------------------------
             if (self::storeMingledOrNot($source, $destinationFolder, $uploadDirAbs)) {
                 if ($destinationExt == 'append') {
-                    $destination = SanityCheck::absPathIsInDocRoot($source . '.webp');
+                    // TODO: make this check work with symlinks
+                    //$destination = SanityCheck::absPathIsInDocRoot($source . '.webp');
+                    $destination = $source . '.webp';
                 } else {
                     $destination = preg_replace('/\\.(jpe?g|png)$/', '', $source) . '.webp';
-                    $destination = SanityCheck::absPathIsInDocRoot($source . '.webp');
+                    // TODO: make this check work with symlinks
+                    //$destination = SanityCheck::absPathIsInDocRoot($source . '.webp');
+                    $destination = $source . '.webp';
                 }
             } else {
                 $docRoot = rtrim(realpath($_SERVER["DOCUMENT_ROOT"]), '/');
                 $imageRoot = $webExpressContentDirAbs . '/webp-images';
-                SanityCheck::absPathIsInDocRoot($imageRoot);
+
+                // TODO: make this check work with symlinks
+                //SanityCheck::absPathIsInDocRoot($imageRoot);
 
                 $sourceRel = substr($source, strlen($docRoot) + 1);
                 $destination = $imageRoot . '/doc-root/' . $sourceRel . '.webp';
-                $destination = SanityCheck::absPathIsInDocRoot($destination);
+
+                // TODO: make this check work with symlinks
+                //$destination = SanityCheck::absPathIsInDocRoot($destination);
             }
 
         } catch (SanityException $e) {
@@ -132,7 +141,7 @@ class ConvertHelperIndependent
             // TODO: This does not work on Windows yet.
             // NOTE: WE CANNOT DO AS WITH sourceIsInsideDocRoot, because it relies on realpath, which only translates EXISTING paths.
             //       $destination does not exist yet, when this method is called from webp-realizer.php
-            if (strpos($destination, $imageRoot . '/doc-root/') === 0) {
+            if (strpos($destination, $imageRoot . '/') === 0) {
 
                 // "Eat" the left part off the $destination parameter. $destination is for example:
                 // "/var/www/webp-express-tests/we0/wp-content-moved/webp-express/webp-images/doc-root/wordpress/uploads-moved/2018/12/tegning5-300x265.jpg.webp"
@@ -142,7 +151,10 @@ class ConvertHelperIndependent
                 $docRoot = rtrim(realpath($_SERVER["DOCUMENT_ROOT"]), '/');
                 $source = $docRoot . '/' . $sourceRel;
                 $source =  preg_replace('/\\.(webp)$/', '', $source);
+            } else {
+                return false;
             }
+
             $source = SanityCheck::absPathExistsAndIsFileInDocRoot($source);
 
         } catch (SanityException $e) {
@@ -317,7 +329,7 @@ APACHE
 
         $text = preg_replace('#' . preg_quote($_SERVER["DOCUMENT_ROOT"]) . '#', '[doc-root]', $text);
 
-        $text = 'WebP Express 0.14.11. ' . $msgTop . ', ' . date("Y-m-d H:i:s") . "\n\r\n\r" . $text;
+        $text = 'WebP Express 0.14.14. ' . $msgTop . ', ' . date("Y-m-d H:i:s") . "\n\r\n\r" . $text;
 
         $logFile = self::getLogFilename($source, $logDir);
 
